@@ -1,0 +1,40 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_28-9b426fb86856716c2f27ab9764e67d9dc3badf27",
+  "solcVersion": "0.8.28",
+  "solcLongVersion": "0.8.28+commit.7893614a",
+  "compilerType": "solc",
+  "userSourceNameMap": {
+    "contracts/UangKas.sol": "project/contracts/UangKas.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "cancun",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/UangKas.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\n\ncontract UangKas {\n    // --- 1. VARIABEL STATE (Data yang disimpan permanen di Blockchain) ---\n    address public bendahara;\n    uint256 public constant IURAN_BULANAN = 0.01 ether; // Simulasi Rp15.000 kita\n    uint256 public totalAnggota;\n\n    // Mapping ini seperti HashMap di Java, untuk mengecek data anggota\n    mapping(address => bool) public isAnggota;\n    mapping(address => uint256) public waktuBayarTerakhir;\n\n    // --- 2. MODIFIER (Aturan pembatasan akses) ---\n    modifier hanyaBendahara() {\n        require(msg.sender == bendahara, \"Ditolak: Anda bukan Bendahara!\");\n        _; // Lanjut eksekusi kode jika syarat di atas terpenuhi\n    }\n\n    modifier hanyaAnggota() {\n        require(\n            isAnggota[msg.sender],\n            \"Ditolak: Anda belum terdaftar sebagai anggota!\"\n        );\n        _;\n    }\n\n    // --- 3. CONSTRUCTOR (Dijalankan sekali saat kontrak pertama kali di-deploy) ---\n    constructor() {\n        bendahara = msg.sender; // Akun yang deploy otomatis jadi Bendahara\n        isAnggota[bendahara] = true;\n        totalAnggota = 1;\n    }\n\n    // --- 4. FUNGSI PENDAFTARAN & KEUANGAN ---\n\n    // Fungsi untuk mendaftarkan akun anggota baru ke dalam sistem\n    function tambahAnggota(address _anggotaBaru) public hanyaBendahara {\n        require(!isAnggota[_anggotaBaru], \"Akun ini sudah menjadi anggota!\");\n\n        isAnggota[_anggotaBaru] = true;\n        totalAnggota++;\n    }\n\n    // Fungsi untuk membayar kas bulanan\n    function bayarKas() public payable hanyaAnggota {\n        // Syarat 1: Uang yang dikirim harus pas 0.01 ETH\n        require(\n            msg.value == IURAN_BULANAN,\n            \"Nominal bayar harus pas 0.01 ETH!\"\n        );\n\n        // Syarat 2: Harus sudah lewat 30 hari dari pembayaran terakhir\n        require(\n            block.timestamp >= waktuBayarTerakhir[msg.sender] + 30 days,\n            \"Belum 30 hari sejak bayar terakhir!\"\n        );\n\n        // Update catatan waktu pembayaran akun tersebut\n        waktuBayarTerakhir[msg.sender] = block.timestamp;\n    }\n\n    // Fungsi untuk mengecek total uang yang ada di dalam kotak kas (Smart Contract)\n    function cekSaldoKas() public view returns (uint256) {\n        return address(this).balance;\n    }\n\n    // --- 5. STRUKTUR DATA PROPOSAL ---\n    struct Proposal {\n        address pengaju;\n        string tujuan;\n        uint256 jumlahDana;\n        address payable penerima; // 'payable' agar alamat ini bisa menerima transfer ETH\n        uint256 jumlahSuaraSetuju;\n        bool sudahCair;\n    }\n\n    // Array untuk menyimpan semua proposal yang pernah dibuat\n    Proposal[] public daftarProposal;\n\n    // Mapping untuk mencatat siapa saja yang sudah vote di proposal tertentu\n    // Format: ID Proposal => Alamat Anggota => Sudah Vote? (true/false)\n    mapping(uint256 => mapping(address => bool)) public sudahVote;\n\n    // --- 6. FUNGSI PENGAJUAN & VOTING ---\n\n    // Fungsi untuk mengajukan pengeluaran uang kas\n    function ajukanPengeluaran(\n        string memory _tujuan,\n        uint256 _jumlahDana,\n        address payable _penerima\n    ) public hanyaAnggota {\n        require(\n            _jumlahDana <= cekSaldoKas(),\n            \"Ditolak: Dana kas tidak mencukupi!\"\n        );\n\n        // Menambahkan proposal baru ke dalam array\n        daftarProposal.push(\n            Proposal({\n                pengaju: msg.sender,\n                tujuan: _tujuan,\n                jumlahDana: _jumlahDana,\n                penerima: _penerima,\n                jumlahSuaraSetuju: 0,\n                sudahCair: false\n            })\n        );\n    }\n\n    // Fungsi untuk memberikan suara (vote) persetujuan\n    function setujuiPengeluaran(uint256 _proposalIndex) public hanyaAnggota {\n        require(\n            _proposalIndex < daftarProposal.length,\n            \"Ditolak: Proposal tidak ditemukan!\"\n        );\n\n        // Kita gunakan 'storage' karena kita ingin mengubah data asli di dalam blockchain\n        Proposal storage proposal = daftarProposal[_proposalIndex];\n\n        require(\n            !proposal.sudahCair,\n            \"Ditolak: Dana proposal ini sudah dicairkan!\"\n        );\n        require(\n            !sudahVote[_proposalIndex][msg.sender],\n            \"Ditolak: Anda sudah memberikan suara untuk proposal ini!\"\n        );\n\n        // Catat bahwa anggota ini sudah vote, lalu tambahkan jumlah suara setuju\n        sudahVote[_proposalIndex][msg.sender] = true;\n        proposal.jumlahSuaraSetuju++;\n    }\n\n    // Fungsi untuk mengeksekusi pencairan dana\n    // Siapa saja boleh menekan tombol ini, asalkan syarat mayoritas terpenuhi\n    function cairkanDana(uint256 _proposalIndex) public {\n        require(\n            _proposalIndex < daftarProposal.length,\n            \"Ditolak: Proposal tidak ditemukan!\"\n        );\n        Proposal storage proposal = daftarProposal[_proposalIndex];\n\n        require(\n            !proposal.sudahCair,\n            \"Ditolak: Dana proposal ini sudah dicairkan sebelumnya!\"\n        );\n\n        // LOGIKA KONSENSUS: Harus lebih dari 50% anggota yang setuju\n        require(\n            proposal.jumlahSuaraSetuju > (totalAnggota / 2),\n            \"Ditolak: Suara mayoritas belum tercapai!\"\n        );\n        require(\n            cekSaldoKas() >= proposal.jumlahDana,\n            \"Ditolak: Saldo kas tidak cukup!\"\n        );\n\n        // PENTING: Ubah status menjadi 'sudahCair' DULU sebelum mentransfer uang.\n        // Ini untuk mencegah celah keamanan bernama 'Re-entrancy Attack'.\n        proposal.sudahCair = true;\n\n        // Proses transfer koin ETH asli ke alamat penerima\n        proposal.penerima.transfer(proposal.jumlahDana);\n    }\n}\n"
+      }
+    }
+  }
+}
